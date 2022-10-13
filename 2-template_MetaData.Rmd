@@ -1,0 +1,170 @@
+---
+title: "Metadata Labling Template"
+author: "Jane Velghe"
+date: '2022-08-03'
+output: pdf_document
+---
+
+```{r }
+library(dplyr)
+library(Seurat)
+library(ggplot2)
+library(patchwork)
+library(DropletUtils)
+# We will repeat this process for each aggregated output of the samples 
+# Initialize the Seurat object with the raw (non-normalized data).
+# We start by reading in the data. The Read10X() function reads in the output
+# of the cellranger pipeline from 10X, returning a unique molecular 
+# identified (UMI) count matrix. The values in this matrix represent the 
+# number of molecules for each feature (i.e. gene; row) that are detected 
+# in each cell (column).
+```
+
+What's the name of the folder for this sample? - all you need to change!
+```{r }
+name <- '/R441P' #change
+folder <- '/R441' #change
+
+sample <- 'R441P' #change
+donor <- 'R441' #change
+```
+
+Update metadata variables
+```{r }
+cells <- 'CD45_Positive' 
+#cells <- 'CD45_Negative' 
+donor_sample <- paste0(donor,'_Immune')
+#donor_sample <- paste0(donor,'_Islet')
+```
+
+Let's get organized before we start
+```{r }
+#path to project folder
+data_path <- c('~/Verchere/jdrf2')
+
+#make a folder for objects plots and name a filepath for this
+dir.create(paste0(data_path,folder,name,"/filt_outs"))
+filt_outs <- paste0(data_path,folder,name,"/filt_outs")
+#make a folder for plots before we filter and name a filepath for this
+dir.create(paste0(data_path,folder,name,"/prefilt_outs"))
+prefilt_outs <- paste0(data_path,folder,name,"/prefilt_outs")
+#make a folder for doubletfinder plots and name a filepath for this
+dir.create(paste0(data_path,folder,name,"/objects"))
+objects <- paste0(data_path,folder,name,"/objects")
+```
+
+```{r}
+data_dir <- paste0(data_path,folder,name,'/SoupX/soupX_filt')
+list.files(data_dir) # Should show barcodes.tsv.gz, features.tsv.gz, and matrix.mtx.gz
+data <- Read10X(data.dir = data_dir)
+obj_prefilt <- CreateSeuratObject(counts = data, project = sample, min.cells = 3, min.features = 200) #min.cells = 3, min.features = 200
+```
+
+```{r }
+#Add labels
+levels(obj_prefilt) #check what identity class labels it has from the start are
+Idents(obj_prefilt) <- "orig.ident" #let's call this identity class this
+#now let's add more metadata to this sample dataset
+
+cells.use <- WhichCells(object = obj_prefilt, idents = sample) #WHO -> which cells do we want to label
+obj_prefilt <- SetIdent(object = obj_prefilt, cells = cells.use, value = sample) #WHAT -> what do we we want to call them?
+obj_prefilt[["Sample"]] <- Idents(object = obj_prefilt) #Where -> Where are we storing this new identity? 
+# here we make a new identity class called sample type, this sample contains PBMCs. 
+levels(obj_prefilt)
+# identity now has changed to most recent value
+
+cells.use <- WhichCells(object = obj_prefilt, idents = sample) #WHO -> which cells do we want to label
+obj_prefilt <- SetIdent(object = obj_prefilt, cells = cells.use, value = donor) #WHAT -> what do we we want to call them?
+obj_prefilt[["Donor"]] <- Idents(object = obj_prefilt) #Where -> Where are we storing this new identity? 
+# here we make a new identity class called sample type, this sample contains PBMCs. 
+levels(obj_prefilt)
+# identity now has changed to most recent value
+
+cells.use <- WhichCells(object = obj_prefilt, idents = donor) #WHO -> which cells do we want to label
+obj_prefilt <- SetIdent(object = obj_prefilt, cells = cells.use, value = cells) #WHAT -> what do we we want to call them?
+obj_prefilt[["Cells"]] <- Idents(object = obj_prefilt) #Where -> Where are we storing this new identity? 
+# here we make a new identity class called sample type, this sample contains PBMCs. 
+levels(obj_prefilt)
+# identity now has changed to most recent value
+
+#let's make another identity, this time it will just be of the machine used by 10X on these samples
+cells.use <- WhichCells(object = obj_prefilt, idents = cells) #you can only get idents from those in a class that is active
+obj_prefilt <- SetIdent(object = obj_prefilt, cells = cells.use, value = donor_sample)
+obj_prefilt[["Donor_Cells"]] <- Idents(object = obj_prefilt)
+levels(obj_prefilt)
+
+#switch back to the original identity
+Idents(obj_prefilt) <- "orig.ident"
+levels(obj_prefilt) 
+```
+
+```{r}
+# Add cell metadata
+obj_prefilt[["percent.mt"]] <- PercentageFeatureSet(obj_prefilt, pattern = "MT-")
+obj_prefilt[["percent.rb"]] <- PercentageFeatureSet(obj_prefilt, pattern = "RP-")
+obj_prefilt <- CellCycleScoring(
+  object = obj_prefilt,
+  g2m.features = cc.genes$g2m.genes,
+  s.features = cc.genes$s.genes,
+  nbin = 20)
+```
+
+Save unfiltered seurat object as a .rds file
+```{r}
+saveRDS(obj_prefilt, paste0(objects,name,"_pre-filtered_so.rds"))
+```
+
+
+Visualize QC metrics as a violin plot
+```{r}
+VlnPlot(obj_prefilt, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.rb"), pt.size = 0.1, assay ="RNA", ncol = 4)
+ggsave(paste0(prefilt_outs,name,"_vln_raw_point_plot_by_run.pdf"), plot = last_plot(), height = 15, width = 10)
+```
+
+Make scatterplot 
+```{r}
+FeatureScatter(obj_prefilt, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+ggsave(paste0(prefilt_outs,name,"_scatter_plot.pdf"), plot = last_plot(), height = 10, width = 10)
+```
+
+Check cycling cells
+```{r}
+VlnPlot(obj_prefilt, features = c("S.Score","G2M.Score"), pt.size =  0.01)
+ggsave(paste0(prefilt_outs,name,"_cell_cycle_vln_plot.pdf"), plot = last_plot(), height = 10, width = 10)
+```
+
+Remove bad cells -> this is common practice. 
+```{r}
+obj_filt <- obj_prefilt
+
+#remove cells with nFeature_RNA < 7000
+#obj_filt <- subset(obj_filt, subset = nFeature_RNA < 7000) 
+
+#remove cells with MT% >10%
+obj_filt <- subset(obj_filt, subset = percent.mt < 10) 
+
+#remove cycling cells 
+#obj_filt <- subset(obj_filt, subset = G2M.Score < 0.5) 
+#obj_filt <- subset(obj_filt, subset = S.Score < 0.5) 
+```
+
+Visualize QC metrics as a violin plot
+```{r}
+VlnPlot(obj_filt, features = c("nFeature_RNA", "nCount_RNA", "percent.mt", "percent.rb"), pt.size = 0.1, assay ="RNA", ncol = 4)
+ggsave(paste0(filt_outs,name,"_vln_raw_point_plot_by_run.pdf"), plot = last_plot(), height = 15, width = 10)
+```
+
+```{r}
+FeatureScatter(obj_filt, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+ggsave(paste0(filt_outs,name,"_scatter_plot.pdf"), plot = last_plot(), height = 10, width = 10)
+```
+
+```{r}
+VlnPlot(obj_filt, features = c("S.Score","G2M.Score"), pt.size =  0.01)
+ggsave(paste0(filt_outs,name,"_cell_cycle_vln_plot.pdf"), plot = last_plot(), height = 10, width = 10)
+```
+
+Save filtered seurat object as a .rds file
+```{r}
+saveRDS(obj_filt, paste0(objects,name,"_filtered_so.rds"))
+```
