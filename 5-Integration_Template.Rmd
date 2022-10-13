@@ -97,7 +97,7 @@ Find cluster markers
 ```{r}
 # find markers for every cluster compared to all remaining cells, report only the positive
 # ones
-cluster.markers <- FindAllMarkers(obj_int, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+cluster.markers <- FindAllMarkers(obj_int, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25, test.use = "MAST")
 cluster.markers %>%
     group_by(cluster) %>%
     slice_max(n = 2, order_by = avg_log2FC)
