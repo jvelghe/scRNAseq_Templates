@@ -1,0 +1,106 @@
+---
+title: "How to Count the Number of Cells Expressing a Given Gene"
+Author: Jane Velghe
+Date: 15-Dec-2021
+---
+
+To get started, load the required packages and your Seurat object
+```{r}
+library(Seurat)
+library(tidyverse)
+
+hislet <- readRDS("~/hislet/hislet.rds") #replace with the path to your object
+
+Idents(hislet) <- "cell_type" # set identity to group by
+levels(hislet) # shows levels of Active_Ident
+
+table(Idents(hislet)) # to get total cell number counts per identity
+```
+
+To count the # of cells expressing a given gene:
+
+RUN THIS (then you can use the function)
+```{r}
+# Original function (NumCellExpringGene) by Ryan-Zhu 
+# Updated 2/4/2020 to output "NA" for genes not detected in certain subgroups
+# Modified 15-Dec-2021 by Jane Velghe to get cell numbers rather than cell %
+
+NumCellExpringGene <- function(object, genes, group.by = "all"){
+    if(group.by == "all"){
+        Count = unlist(lapply(genes,calc_helper, object=object))
+        result = data.frame(Markers = genes, Cell_Count = Count)
+        return(result)
+        
+        # Original function (NumCellExpringGene) by Ryan-Zhu 
+        # https://github.com/satijalab/seurat/issues/371#issuecomment-486384854 
+        # Updated 2/4/2020 to output "NA" for genes not detected in certain subgroups
+        # Modified 15-Dec-2021 by Jane Velghe to get cell numbers rather than cell %
+    }
+
+    else{        
+        list = SplitObject(object, group.by)
+        factors = names(list)
+
+        results = lapply(list, NumCellExpringGene, genes=genes)
+        for(i in 1:length(factors)){
+        results[[i]]$Feature = factors[i]
+        }
+        combined = do.call("rbind", results)
+        return(combined)
+    }
+}
+calc_helper <- function(object,genes){
+    counts = object[['RNA']]@counts
+    ncells = ncol(counts)
+    if(genes %in% row.names(counts)){
+    sum(counts[genes,]>0)
+    }else{return(NA)}
+}
+
+# example
+NumCellExpringGene(hislet, genes = "INS", group.by = "cell_type")
+```
+
+
+To calculate the % of cells expressing a given gene:
+```{r}
+# Function by Ryan-Zhu 
+# https://github.com/satijalab/seurat/issues/371#issuecomment-486384854 
+# updated 1/31/2020 to accommodate V3.1
+# updated 2/4/2020 to output "NA" for genes not detected in certain subgroups
+
+PrctCellExpringGene <- function(object, genes, group.by = "all"){
+    if(group.by == "all"){
+        prct = unlist(lapply(genes,calc_helper, object=object))
+        result = data.frame(Markers = genes, Cell_proportion = prct)
+        return(result)
+        
+        # Function by Ryan-Zhu 
+        # https://github.com/satijalab/seurat/issues/371#issuecomment-486384854 
+        # updated 1/31/2020 to accommodate V3.1
+        # updated 2/4/2020 to output "NA" for genes not detected in certain subgroups
+    }
+
+    else{        
+        list = SplitObject(object, group.by)
+        factors = names(list)
+
+        results = lapply(list, PrctCellExpringGene, genes=genes)
+        for(i in 1:length(factors)){
+        results[[i]]$Feature = factors[i]
+        }
+        combined = do.call("rbind", results)
+        return(combined)
+    }
+}
+calc_helper <- function(object,genes){
+    counts = object[['RNA']]@counts
+    ncells = ncol(counts)
+    if(genes %in% row.names(counts)){
+    sum(counts[genes,]>0)/ncells
+    }else{return(NA)}
+}
+
+# example
+PrctCellExpringGene(hislet, genes = "INS", group.by = "cell_type")
+```
